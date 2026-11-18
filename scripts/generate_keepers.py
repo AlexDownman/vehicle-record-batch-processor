@@ -15,23 +15,18 @@ Usage:
 import argparse
 import csv
 import random
-import re
 import sys
 from datetime import date, timedelta
 
 from faker import Faker
+
+from synthetic import fake_name, fake_postcode
 
 # A fixed seed means the same keepers are generated on every run.
 SEED = 20240101
 
 # Keeper history runs up to this date; nightly changes come after it.
 HISTORY_END = date(2023, 12, 31)
-
-# Matches keepers_postcode_ck in sql/02_tables.sql.
-POSTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]? [0-9][A-Z]{2}$")
-
-# Matches the width of KEEPERS.keeper_name and the nightly file's value field.
-MAX_NAME_LEN = 40
 
 
 def latest_first_use_dates(seed_path):
@@ -75,18 +70,6 @@ def keeper_periods(first_use, rng):
         end = starts[i + 1] - timedelta(days=1) if i + 1 < len(starts) else None
         periods.append((start, end))
     return periods
-
-
-def fake_postcode(fake):
-    """Return a Faker postcode that passes the KEEPERS check constraint."""
-    while True:
-        postcode = fake.postcode()
-        if POSTCODE_RE.match(postcode):
-            return postcode
-
-
-def fake_name(fake):
-    return f"{fake.first_name()} {fake.last_name()}"[:MAX_NAME_LEN]
 
 
 def main():
