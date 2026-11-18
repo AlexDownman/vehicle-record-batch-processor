@@ -2,7 +2,7 @@
 #
 # Manage the Oracle Database Free container for the batch processor.
 #
-# Usage: docker/oracle.sh start|stop|status|logs|sqlplus
+# Usage: docker/oracle.sh start|stop|status|logs|sqlplus|sqlldr
 #
 # The first `start` needs ORACLE_PWD set; it becomes the password for SYS,
 # SYSTEM and PDBADMIN. Later starts reuse the existing container and volume.
@@ -76,7 +76,8 @@ main() {
         status)  docker inspect -f '{{.State.Status}} ({{.State.Health.Status}})' "$CONTAINER" ;;
         logs)    docker logs --tail 100 -f "$CONTAINER" ;;
         sqlplus) shift; docker exec -it "$CONTAINER" sqlplus "$@" ;;
-        *)       die "usage: $0 start|stop|status|logs|sqlplus [args]" ;;
+        sqlldr)  shift; docker exec -it "$CONTAINER" sqlldr "$@" ;;
+        *)       die "usage: $0 start|stop|status|logs|sqlplus|sqlldr [args]" ;;
     esac
 }
 
