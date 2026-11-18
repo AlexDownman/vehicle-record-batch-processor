@@ -9,9 +9,11 @@
 #   load      SQL*Loader: validator output into BATCH_INPUT(_REJECTS)
 #   apply     vehicle_batch_pkg.process_file: business rules and updates
 #   archive   moves the inbound file to data/archive/
+#   report    data/reports/report_YYYYMMDD.txt for the morning team
 # Each stage checks the exit code of what it runs. The first failure stops
 # the batch with its own exit code, so cron or monitoring can tell what
-# broke without reading the log.
+# broke without reading the log. A failed batch still leaves a short
+# report_YYYYMMDD_FAILED_<time>.txt, so there is always a report to read.
 #
 # Exit codes:
 #   0  batch completed (records may still have been rejected: see REJECTIONS)
@@ -22,6 +24,7 @@
 #   5  SQL*Loader failed to load the validator output
 #   6  database unavailable, or PL/SQL processing failed
 #   7  batch applied, but the inbound file could not be archived
+#   8  batch applied and archived, but the report could not be produced
 #
 # Credentials: the VSS password is read from $VRBP_CREDENTIALS (default
 # ~/.config/vrbp/credentials), which must be readable by its owner only
@@ -48,6 +51,7 @@ readonly EXIT_REJECTED=4
 readonly EXIT_LOAD=5
 readonly EXIT_DB=6
 readonly EXIT_ARCHIVE=7
+readonly EXIT_REPORT=8
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly PROJECT_DIR
@@ -78,8 +82,45 @@ die() {
     local code="$1"
     shift
     log "ERROR: $*"
+    write_failure_report "$code" "$*"
     log "Batch FAILED (exit $code)"
     exit "$code"
+}
+
+# A short report for a batch that did not complete, so the morning team
+# never finds the report folder empty. It gets its own name, because a
+# duplicate delivery must not overwrite last night's good report.
+write_failure_report() {
+    local code="$1" message="$2"
+    [[ -n "${BASE_NAME:-}" ]] || return 0
+
+    local report="$DATA_DIR/reports/report_${FILE_DATE}_FAILED_$(date -u +%Y%m%dT%H%M%SZ)_$$.txt"
+    local rule="===================================================================================================="
+    # Archive and report failures happen after the changes were committed.
+    local status="BATCH FAILED: changes from this file were NOT applied"
+    if [[ "$code" -eq "$EXIT_ARCHIVE" || "$code" -eq "$EXIT_REPORT" ]]; then
+        status="CHANGES APPLIED, but follow-up is needed (see reason)"
+    fi
+    if {
+        echo "$rule"
+        echo "VEHICLE RECORDS NIGHTLY BATCH - MORNING SUMMARY"
+        echo "$rule"
+        echo "File             : ${BASE_NAME}.dat"
+        echo "Status           : $status"
+        echo "Exit code        : $code (see the exit codes at the top of run_batch.sh)"
+        echo "Failed at (UTC)  : $(date -u '+%Y-%m-%d %H:%M:%S')"
+        echo
+        echo "Reason:"
+        echo "  $message"
+        echo
+        echo "Full log: ${LOG_FILE:-(none)}"
+        echo "$rule"
+    } > "$report.tmp" 2>/dev/null && mv "$report.tmp" "$report"; then
+        log "Failure report written to $report"
+    else
+        rm -f "$report.tmp"
+        log "WARNING: could not write failure report $report"
+    fi
 }
 
 # Maps a host path under data/ to the same file inside the container.
@@ -102,6 +143,7 @@ parse_args() {
     readonly INPUT="$DATA_DIR/inbound/${BASE_NAME}.dat"
     readonly CLEAN_FILE="$DATA_DIR/work/${BASE_NAME}.clean"
     readonly REJECTS_FILE="$DATA_DIR/rejects/${BASE_NAME}.rej"
+    readonly REPORT_FILE="$DATA_DIR/reports/report_${FILE_DATE}.txt"
 }
 
 # Sends everything this script and its commands print to the log file as
@@ -313,6 +355,31 @@ stage_archive() {
     log "Stage archive: OK"
 }
 
+stage_report() {
+    log "Stage report: writing $REPORT_FILE"
+    local rc=0 output
+
+    # Spooled to .tmp and renamed, so nobody opens a half-written report.
+    output="$(trap - ERR; docker exec -i "$CONTAINER" sqlplus -s /nolog <<EOF 2>&1
+WHENEVER OSERROR EXIT FAILURE
+WHENEVER SQLERROR EXIT FAILURE
+CONNECT $DB_USER/"$DB_PASSWORD"@$DB_SERVICE
+@/sql/report/batch_report.sql ${BASE_NAME}.dat $(container_path "$REPORT_FILE.tmp")
+EOF
+)" || rc=$?
+
+    if [[ "$rc" -ne 0 ]] || ! mv "$REPORT_FILE.tmp" "$REPORT_FILE"; then
+        # The report's own output is only logged on failure; on success it
+        # would just repeat the report file in the log.
+        printf '%s\n' "$output" | log_output
+        rm -f "$REPORT_FILE.tmp"
+        die "$EXIT_REPORT" "batch APPLIED and archived, but the report failed. Do not rerun" \
+            "the batch. Rebuild the report with: docker/oracle.sh sqlplus vss@$DB_SERVICE" \
+            "@/sql/report/batch_report.sql ${BASE_NAME}.dat /data/reports/report_${FILE_DATE}.txt"
+    fi
+    log "Stage report: OK"
+}
+
 main() {
     parse_args "$@"
     setup_logging
@@ -324,7 +391,10 @@ main() {
     stage_validate
     stage_load
     stage_apply
+    # Archive before the report: if the report then fails, the changes are
+    # already committed and the file is safely out of inbound/.
     stage_archive
+    stage_report
 
     log "Batch COMPLETED for $BASE_NAME in ${SECONDS}s"
     exit "$EXIT_OK"
