@@ -58,6 +58,7 @@ FAULT_STAGE = {
     "UNKNOWN_REG":      "PLSQL",
     "ALREADY_SCRAPPED": "PLSQL",
     "BAD_POSTCODE":     "PLSQL",
+    "DATE_CONFLICT":    "PLSQL",
 }
 
 PLATE_LETTERS = "ABCDEFGHJKLMNOPRSTUVWXY"
@@ -68,6 +69,7 @@ class Vehicle:
     registration: str
     colour: str
     status: str
+    keeper_start: date | None = None  # current keeper's start date
 
 
 @dataclass
@@ -88,9 +90,15 @@ class Change:
 
 
 def read_extract(path):
+    vehicles = []
     with open(path, newline="", encoding="utf-8") as f:
-        return [Vehicle(row["REGISTRATION"], row["COLOUR"], row["STATUS"])
-                for row in csv.DictReader(f)]
+        for row in csv.DictReader(f):
+            start = row["KEEPER_START"]
+            vehicles.append(Vehicle(
+                row["REGISTRATION"], row["COLOUR"], row["STATUS"],
+                datetime.strptime(start, "%Y%m%d").date() if start else None,
+            ))
+    return vehicles
 
 
 def good_change(vehicle, change_type, file_date, fake, rng):
@@ -115,7 +123,7 @@ def unknown_registration(known, rng):
             return reg
 
 
-def plant_fault(change, fault, file_date, known, fake, rng):
+def plant_fault(change, fault, vehicle, file_date, known, fake, rng):
     """Damage a good change so it should be rejected with reason `fault`.
 
     ALREADY_SCRAPPED is not handled here: it depends on where the record
@@ -149,6 +157,12 @@ def plant_fault(change, fault, file_date, known, fake, rng):
         change.change_type = "KEEPER"
         change.value = fake_name(fake)
         change.postcode = rng.choice(["SW1A1AA", "12345", "SA1", "A1 1A"])
+    elif fault == "DATE_CONFLICT":
+        # A new keeper dated on the day the current keeper started.
+        change.change_type = "KEEPER"
+        change.value = fake_name(fake)
+        change.postcode = fake_postcode(fake)
+        change.effective = vehicle.keeper_start.strftime("%Y%m%d")
     return change
 
 
@@ -212,15 +226,24 @@ def main():
     except (OSError, KeyError) as exc:
         sys.exit(f"ERROR: cannot read {args.extract}: {exc}")
     known = {v.registration for v in vehicles}
-    active = [v for v in vehicles if v.status == "ACTIVE"]
+
+    # Only active vehicles whose current keeper started before the earliest
+    # effective date in this file. A keeper change from an earlier night may
+    # be later than tonight's backdated dates, and would then be rejected
+    # as DATE_CONFLICT by accident.
+    earliest_effective = file_date - timedelta(days=MAX_BACKDATE_DAYS)
+    eligible = [v for v in vehicles
+                if v.status == "ACTIVE"
+                and v.keeper_start is not None
+                and v.keeper_start < earliest_effective]
 
     n_bad = round(args.records * args.bad_rate)
     n_good = args.records - n_bad
-    if args.records > len(active):
-        sys.exit(f"ERROR: only {len(active)} active vehicles; ask for fewer records")
+    if args.records > len(eligible):
+        sys.exit(f"ERROR: only {len(eligible)} eligible vehicles; ask for fewer records")
 
     # One vehicle per record, so no vehicle has two good changes in a file.
-    chosen = rng.sample(active, args.records)
+    chosen = rng.sample(eligible, args.records)
     types = rng.choices(list(CHANGE_WEIGHTS), weights=CHANGE_WEIGHTS.values(), k=args.records)
     changes = [good_change(v, t, file_date, fake, rng)
                for v, t in zip(chosen[:n_good], types[:n_good])]
@@ -247,7 +270,7 @@ def main():
             changes.insert(rng.randint(scrap_at + 1, len(changes)), bad)
         else:
             bad = plant_fault(good_change(vehicle, change_type, file_date, fake, rng),
-                              fault, file_date, known, fake, rng)
+                              fault, vehicle, file_date, known, fake, rng)
             changes.insert(rng.randint(0, len(changes)), bad)
 
     header = f"HDR{args.date}".ljust(RECORD_LEN)

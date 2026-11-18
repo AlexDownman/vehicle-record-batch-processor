@@ -128,8 +128,10 @@ ISO-8601 UTC timestamp.
 ## Generating a test file
 
 ```bash
-# 1. Extract current vehicles (rerun after each batch, so scraps are seen)
-docker/oracle.sh sqlplus -s vss@FREEPDB1 @/sql/extract_vehicles.sql
+# 1. Extract current vehicles (rerun after each batch, so scraps and new
+#    keepers are seen: the generator avoids vehicles whose keeper changed
+#    within the last MAX_BACKDATE_DAYS, which would cause DATE_CONFLICT)
+docker/oracle.sh sqlplus vss@FREEPDB1 @/sql/extract_vehicles.sql
 
 # 2. Generate the file (defaults: 1,000 records, 1.5% bad, today's date)
 .venv/bin/python scripts/generate_nightly.py \
