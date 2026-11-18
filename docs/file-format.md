@@ -72,6 +72,7 @@ business rules against the database.
 | Code | Stage | Meaning |
 |---|---|---|
 | `BAD_LENGTH` | VALIDATOR | Line is not 72 characters |
+| `BAD_CHARACTER` | VALIDATOR | Line contains a tab, control or non-ASCII character |
 | `BAD_REG_FORMAT` | VALIDATOR | Registration does not match `AB12 CDE` |
 | `BAD_CHANGE_TYPE` | VALIDATOR | Change type is not `KEEPER`, `COLOUR` or `SCRAP` |
 | `BAD_DATE` | VALIDATOR | Effective date is not a real `YYYYMMDD` date |
@@ -82,6 +83,44 @@ business rules against the database.
 
 Records are applied in file order, so a `SCRAP` followed later by a
 `COLOUR` for the same vehicle rejects the `COLOUR`.
+
+The validator applies its checks in the order listed and reports the
+first one that fails. For a `SCRAP`, any value or postcode is ignored.
+
+## Validator outputs
+
+`build/validator INPUT CLEAN_OUT REJECTS_OUT` writes two files.
+
+**Clean file:** one line per record that passed, for `vehicle_batch_pkg`.
+
+| Field | Positions | Width | Content |
+|---|---|---|---|
+| Line number | 1–9 | 9 | line in the input file, zero-padded |
+| Record | 10–81 | 72 | the change record, unchanged |
+
+**Rejects file:** one line per record that failed, for `REJECTIONS`.
+
+| Field | Positions | Width | Content |
+|---|---|---|---|
+| Line number | 1–9 | 9 | line in the input file, zero-padded |
+| Separator | 10 | 1 | space |
+| Reason code | 11–30 | 20 | from the table above, space-padded |
+| Separator | 31 | 1 | space |
+| Raw record | 32–131 | up to 100 | the line as received; unprintable characters shown as `?` |
+
+Both are written as `<name>.tmp` and renamed when the whole file has
+passed. If the file is rejected, neither output exists.
+
+**Exit codes**
+
+| Code | Meaning | Outputs |
+|---|---|---|
+| 0 | File processed; some records may have been rejected | both written |
+| 1 | Usage or I/O error (cannot open input, cannot write output) | none |
+| 2 | File rejected: empty, bad or missing header, header date not matching the file name, missing or bad trailer, wrong record count, data after the trailer | none |
+
+The validator logs to stderr, one line per message, prefixed with an
+ISO-8601 UTC timestamp.
 
 ## Generating a test file
 
