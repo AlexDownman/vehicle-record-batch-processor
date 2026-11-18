@@ -71,6 +71,7 @@ compile_commands.json
 !/data/rejects/
 !/data/reports/
 !/data/logs/
+!/data/work/
 /data/*/*
 !/data/*/.gitkeep
 

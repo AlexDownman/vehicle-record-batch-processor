@@ -80,6 +80,9 @@ business rules against the database.
 | `UNKNOWN_REG` | PLSQL | No vehicle has this registration |
 | `ALREADY_SCRAPPED` | PLSQL | Vehicle is scrapped (in the database, or by an earlier line of the same file) |
 | `BAD_POSTCODE` | PLSQL | Postcode is not a valid UK postcode format |
+| `DATE_CONFLICT` | PLSQL | `KEEPER` effective date is not after the current keeper's start date |
+| `BAD_COLOUR` | PLSQL | Colour is longer than `VEHICLES.colour` (20 characters) |
+| `DB_ERROR` | PLSQL | Unexpected Oracle error on this record; `reason_text` holds the message |
 
 Records are applied in file order, so a `SCRAP` followed later by a
 `COLOUR` for the same vehicle rejects the `COLOUR`.
