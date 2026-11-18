@@ -1,0 +1,14 @@
+# crontab.example - schedule for the nightly batch.
+#
+# Install for the current user with:  crontab -e   (then paste the line below,
+# with the path changed to where the project lives)
+#
+# Fields: minute hour day-of-month month day-of-week command
+#
+# Runs at 01:30 every night. run_batch.sh writes its own timestamped log to
+# data/logs/; cron.log only catches anything printed before logging starts
+# (e.g. the log folder is unwritable). MAILTO, if the machine can send mail,
+# emails that output to the support mailbox.
+#
+# MAILTO=vehicle-batch-support@example.org
+30 1 * * * /path/to/vehicle-records-batch-processor/scripts/run_batch.sh >> /path/to/vehicle-records-batch-processor/data/logs/cron.log 2>&1
