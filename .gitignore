@@ -81,3 +81,6 @@ compile_commands.json
 
 # Local AI assistant instructions (not part of the project)
 CLAUDE.md
+
+# Python virtualenv (recreate with: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
+.venv/
